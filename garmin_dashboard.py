@@ -1,376 +1,329 @@
 # garmin_dashboard.py
-import os
-import io
-import streamlit as st
-import pandas as pd
+import os, re
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import streamlit as st
 
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import KFold, cross_val_score, train_test_split
-from sklearn.metrics import classification_report, accuracy_score, recall_score, confusion_matrix
-from sklearn.utils.validation import check_is_fitted
+from sklearn.metrics import mean_absolute_error, r2_score
 
 # =========================
-# Page setup
+# Page / Sidebar
 # =========================
-st.set_page_config(page_title="Garmin HRV Status Forecast (28-day)", layout="wide")
-st.title("🩺 Garmin HRV Status Forecast — Small-Data Edition")
-st.caption("Designed for Garmin's 28-day HRV Status export (Date, Overnight HRV, Baseline, 7d Avg).")
+st.set_page_config(page_title="Garmin HRV Status Forecast (Next 1–3 days)", layout="wide")
+st.title("🩺 Garmin HRV Status Forecast — Overnight HRV (Next 1–3 days)")
 
-# =========================
-# Sidebar controls
-# =========================
 st.sidebar.header("⚙️ Settings")
-uploaded = st.sidebar.file_uploader("📂 Upload `HRV Status Garmin.csv`", type=["csv"])
-
-dev_threshold = st.sidebar.slider("Deviation threshold (ms): Low/High vs Stable",
-                                  min_value=3, max_value=20, value=5, step=1)
-roll_days = st.sidebar.slider("Rolling window (days) for trend features",
-                              min_value=3, max_value=14, value=7, step=1)
-forecast_horizon = st.sidebar.selectbox("Forecast horizon (days ahead)", [1, 2, 3], index=0)
+local_default_path = "HRV Status Garmin.csv"  # your exact file name
+uploaded = st.sidebar.file_uploader("📂 Upload your **HRV Status Garmin.csv**", type=["csv"])
+forecast_horizon = st.sidebar.selectbox("Forecast horizon (days ahead)", [1, 2, 3], index=2)
+roll_days = st.sidebar.slider("Rolling window for trend features (days)", 3, 14, 7, 1)
 
 st.sidebar.markdown("---")
-st.sidebar.info("Garmin export contains **daily (overnight)** HRV values (max ~28 rows). "
-                "This app forecasts **next-day status** (and recursively up to 3 days).")
+st.sidebar.info("This app expects columns like: **Date**, **Overnight HRV**, **Baseline** (e.g., `88ms - 107ms`), **7d Avg`**.\n"
+                "It trains a small regression model on ≤28 days and predicts the next 1–3 days of **Overnight HRV**.")
 
 # =========================
-# Helpers
+# File loading
 # =========================
-def load_sample():
-    dates = pd.date_range("2025-09-01", periods=28, freq="D")
-    rng = np.random.default_rng(7)
-    baseline = 55 + rng.normal(0, 0.6, size=len(dates)).cumsum() / 12 + 45
-    overnight = baseline + rng.normal(0, 6, size=len(dates))
-    avg7 = pd.Series(overnight).rolling(7).mean().fillna(method="bfill")
-    df = pd.DataFrame({
-        "Date": dates,
-        "Overnight HRV": np.round(overnight, 1),
-        "Baseline": np.round(baseline, 1),
-        "7d Avg": np.round(avg7, 1)
-    })
-    return df
-
-def normalize_columns(df_in: pd.DataFrame) -> pd.DataFrame:
-    # lower, strip, underscores
-    df = df_in.copy()
-    df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
-    # Map common variants to internal names
-    rename_map = {
-        "date": "date",
-        "overnight_hrv": "overnight_hrv",
-        "overnight": "overnight_hrv",
-        "baseline": "baseline",
-        "7d_avg": "seven_day_average",
-        "7_day_average": "seven_day_average",
-        "7-day_average": "seven_day_average",
-        "7-day_avg": "seven_day_average",
-        "seven_day_average": "seven_day_average",
-    }
-    norm = {}
-    for c in df.columns:
-        key = rename_map.get(c, None)
-        if key:
-            norm[key] = df[c]
-    return pd.DataFrame(norm)
-
-def status_from_dev(d: float, th: float) -> int:
-    if d > th:
-        return 1   # High
-    if d < -th:
-        return -1  # Low
-    return 0       # Stable
-
-def status_label(x: int) -> str:
-    return { -1: "Low", 0: "Stable", 1: "High" }.get(int(x), "Unknown")
-
-def status_color(x: int) -> str:
-    return { -1: "red", 0: "gold", 1: "green" }.get(int(x), "gray")
-
-# =========================
-# Load data
-# =========================
-if uploaded is not None:
-    raw = pd.read_csv(uploaded)
-    st.success("✅ File uploaded.")
-else:
-    st.info("Using built-in 28-day sample (upload your real `HRV Status Garmin.csv` for best results).")
-    raw = load_sample()
-
-norm = normalize_columns(raw)
-
-required = ["date", "overnight_hrv", "baseline", "seven_day_average"]
-missing = [c for c in required if c not in norm.columns]
-if missing:
-    st.error(f"Missing required column(s): {missing}. Found columns: {list(raw.columns)}")
+def load_dataframe():
+    # Priority: uploaded -> local file
+    if uploaded is not None:
+        st.success("✅ File uploaded.")
+        return pd.read_csv(uploaded)
+    if os.path.exists(local_default_path):
+        st.success("✅ Using local file: HRV Status Garmin.csv")
+        return pd.read_csv(local_default_path)
+    st.error("❌ No data file found. Upload `HRV Status Garmin.csv` or place it next to this script.")
     st.stop()
 
-df = norm.copy()
+raw = load_dataframe()
 
-# Safely convert Garmin-style dates (handles text, mixed, or UTC formats)
-df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True, infer_datetime_format=True)
-df = df.dropna(subset=["date"]).reset_index(drop=True)
-df = df.sort_values("date").reset_index(drop=True)
+# =========================
+# Parsing helpers
+# =========================
+def parse_date_any(s):
+    s = str(s).strip()
+    # If no 4-digit year, append current year
+    if not re.search(r"\b\d{4}\b", s):
+        s = f"{s} {pd.Timestamp.today().year}"
+    dt = pd.to_datetime(s, errors="coerce", utc=True, infer_datetime_format=True)
+    return dt.tz_convert(None) if dt is not pd.NaT else dt
 
-# Guardrail: Garmin export size
-if len(df) > 28:
-    st.warning(f"File has {len(df)} rows; Garmin HRV export is typically <= 28 days. Proceeding with all rows.")
-elif len(df) < 10:
-    st.warning(f"Only {len(df)} rows detected — forecasts may be unstable. More days improve reliability.")
+def to_ms(x):
+    if pd.isna(x): return np.nan
+    s = str(x).lower().replace("ms", "").strip()
+    # Sometimes Garmin writes '—' or blanks
+    s = s.replace("—", "").replace("--", "").strip()
+    return pd.to_numeric(s, errors="coerce")
+
+def parse_baseline_range(x):
+    """Return (low, high, mid) from '88ms - 107ms'."""
+    if pd.isna(x): return (np.nan, np.nan, np.nan)
+    s = str(x).lower().replace(" ", "")
+    m = re.match(r"(\d+)\s*ms?-+(\d+)\s*ms?", s)
+    if not m:
+        # Sometimes baseline appears as a single number
+        val = to_ms(x)
+        return (val, val, val)
+    low, high = float(m.group(1)), float(m.group(2))
+    return (low, high, (low + high) / 2.0)
+
+# =========================
+# Normalize columns and clean
+# =========================
+df = raw.copy()
+
+# Normalize headers (lowercase, underscores)
+df.columns = df.columns.str.strip()
+
+# Expected names (tolerant)
+# We’ll map common variants to a canonical set
+col_map = {}
+for c in df.columns:
+    c_norm = c.strip().lower().replace(" ", "_")
+    if c_norm in ("date",):
+        col_map[c] = "date"
+    elif c_norm in ("overnight_hrv", "overnight_hrv_(ms)", "overnight", "overnight_average_hrv_(ms)"):
+        col_map[c] = "overnight_hrv"
+    elif c_norm in ("baseline", "hrv_baseline_(ms)"):
+        col_map[c] = "baseline"
+    elif c_norm in ("7d_avg", "7d_average", "7-day_avg", "7-day_average", "7_day_average", "7d_avg_(ms)"):
+        col_map[c] = "seven_day_avg"
+# Apply the mapping (keep only known)
+df = df.rename(columns=col_map)
+required = ["date", "overnight_hrv", "baseline", "seven_day_avg"]
+missing = [c for c in required if c not in df.columns]
+if missing:
+    st.error(f"❌ Missing required column(s): {missing}\n\nFound columns: {list(raw.columns)}")
+    st.stop()
+
+# Parse/clean each field
+df = df[required].copy()
+df["date"] = df["date"].apply(parse_date_any)
+df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+
+# Overnight HRV and 7d Avg are like '109ms'
+df["overnight_hrv"] = df["overnight_hrv"].apply(to_ms)
+df["seven_day_avg"] = df["seven_day_avg"].apply(to_ms)
+
+# Baseline as a range '88ms - 107ms'
+baseline_parsed = df["baseline"].apply(parse_baseline_range)
+df["baseline_low"]  = [t[0] for t in baseline_parsed]
+df["baseline_high"] = [t[1] for t in baseline_parsed]
+df["baseline_mid"]  = [t[2] for t in baseline_parsed]
+
+# Basic NA handling
+df = df.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+
+# Guardrails for small Garmin export
+n_rows = len(df)
+if n_rows > 28:
+    st.warning(f"ℹ️ Detected {n_rows} rows (more than typical 28-day export). Proceeding with all rows.")
+elif n_rows < 8:
+    st.warning(f"⚠️ Only {n_rows} rows detected — forecasts may be unstable. More days improve reliability.")
 
 # =========================
 # Feature engineering
 # =========================
-df["hrv_deviation"]    = df["overnight_hrv"] - df["baseline"]
-df["weekly_deviation"] = df["overnight_hrv"] - df["seven_day_average"]
-df["hrv_change_rate"]  = df["overnight_hrv"].pct_change()
+# Deviations and rates
+df["dev_vs_baseline"] = df["overnight_hrv"] - df["baseline_mid"]
+df["dev_vs_7davg"]    = df["overnight_hrv"] - df["seven_day_avg"]
+df["hrv_change_rate"] = df["overnight_hrv"].pct_change()
 
-# Rolling features (keep short to fit 28 rows)
-df["overnight_roll_mean"] = df["overnight_hrv"].rolling(roll_days).mean()
-df["overnight_roll_std"]  = df["overnight_hrv"].rolling(roll_days).std()
-df["dev_roll_mean"]       = df["hrv_deviation"].rolling(roll_days).mean()
-df["dev_roll_std"]        = df["hrv_deviation"].rolling(roll_days).std()
+# Rolling features (short windows to fit 28 rows)
+df["hrv_roll_mean"] = df["overnight_hrv"].rolling(roll_days).mean()
+df["hrv_roll_std"]  = df["overnight_hrv"].rolling(roll_days).std()
+df["dev_roll_mean"] = df["dev_vs_baseline"].rolling(roll_days).mean()
+df["dev_roll_std"]  = df["dev_vs_baseline"].rolling(roll_days).std()
 
-# Fill minimal NaNs to preserve rows
-df = df.ffill().bfill()
+df = df.replace([np.inf, -np.inf], np.nan).ffill().bfill()
 
-# Current (today) status for display
-df["status_today"] = df["hrv_deviation"].apply(lambda d: status_from_dev(d, dev_threshold))
+# =========================
+# Data preview
+# =========================
+st.markdown("### 📋 Data Preview (cleaned)")
+st.dataframe(
+    df[["date","overnight_hrv","baseline_low","baseline_high","baseline_mid","seven_day_avg"]],
+    use_container_width=True, hide_index=True
+)
 
-# Future label = tomorrow's status
-df["future_status"] = df["status_today"].shift(-1)
-df_model = df.dropna(subset=["future_status"]).copy()
-df_model["future_status"] = df_model["future_status"].astype(int)
-
+# =========================
+# Model: Predict Overnight HRV (regression)
+# =========================
 feature_cols = [
-    "overnight_hrv", "baseline", "seven_day_average",
-    "hrv_deviation", "weekly_deviation", "hrv_change_rate",
-    "overnight_roll_mean", "overnight_roll_std",
-    "dev_roll_mean", "dev_roll_std"
+    "baseline_low","baseline_high","baseline_mid",
+    "seven_day_avg",
+    "dev_vs_baseline","dev_vs_7davg","hrv_change_rate",
+    "hrv_roll_mean","hrv_roll_std","dev_roll_mean","dev_roll_std"
 ]
-X_all = df_model[feature_cols].replace([np.inf, -np.inf], np.nan).ffill().bfill()
-y_all = df_model["future_status"]
+target_col = "overnight_hrv"
 
-# =========================
-# Data preview & class balance
-# =========================
-st.markdown("### 📋 Data Preview")
-st.dataframe(df.tail(10), use_container_width=True, hide_index=True)
+X_all = df[feature_cols].copy()
+y_all = df[target_col].copy()
 
-st.markdown("### ⚖️ Class Balance at Current Threshold")
-cls_counts = y_all.value_counts().sort_index()
-cls_view = pd.DataFrame({
-    "HRV Status": [status_label(i) for i in cls_counts.index.tolist()],
-    "Count": cls_counts.values
-})
-st.dataframe(cls_view, use_container_width=True, hide_index=True)
+# Handle any residual NaNs
+X_all = X_all.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+y_all = y_all.replace([np.inf, -np.inf], np.nan).ffill().bfill()
 
-# =========================
-# Modeling for tiny datasets
-# =========================
-if y_all.nunique() < 2:
-    st.warning(f"⚠️ Only one class found at threshold = {dev_threshold} ms. "
-               "Automatically lowering threshold for training.")
-    # Find the smallest threshold that yields >1 class
-    for t in range(max(1, int(dev_threshold) - 5), 1, -1):
-        df["status_today"] = df["hrv_deviation"].apply(lambda d: status_from_dev(d, t))
-        y_tmp = df["status_today"].shift(-1).dropna()
-        if y_tmp.nunique() > 1:
-            dev_threshold = t
-            st.info(f"✅ Adjusted threshold to {t} ms for training.")
-            break
-    else:
-        st.error("❌ Not enough variation in HRV data, even after adjustment.")
-        st.stop()
+# Small, interpretable model suited for ≤28 rows
+model = RandomForestRegressor(
+    n_estimators=200,
+    max_depth=6,
+    min_samples_split=3,
+    random_state=42
+)
 
+# Cross-validated metrics (don’t waste rows)
+if len(df) >= 8:
+    n_splits = min(5, max(2, len(df)//5))
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    mae_scores = -cross_val_score(model, X_all, y_all, cv=kf, scoring="neg_mean_absolute_error")
+    r2_scores  =  cross_val_score(model, X_all, y_all, cv=kf, scoring="r2")
+    cv_mae = float(mae_scores.mean())
+    cv_r2  = float(r2_scores.mean())
+else:
+    cv_mae, cv_r2 = np.nan, np.nan
 
-model = DecisionTreeClassifier(max_depth=3, random_state=42)
-
-# Prefer K-Fold CV for small N
-k = min(5, max(2, len(X_all)//5))  # aim for at least 2 folds
-cv = KFold(n_splits=k, shuffle=True, random_state=42)
-cv_acc = cross_val_score(model, X_all, y_all, cv=cv, scoring="accuracy")
-st.markdown("### 🧪 Cross-Validated Performance")
-c1, c2 = st.columns(2)
-c1.metric("CV Accuracy (mean)", f"{cv_acc.mean():.2f}")
-c2.metric("CV Accuracy (std)", f"{cv_acc.std():.2f}")
-
-# Fit once for explanations/importance & to enable forecast
-# (Use a light split or full fit if splitting fails)
+# Fit once for explanation and forecasting
 try:
     X_tr, X_te, y_tr, y_te = train_test_split(
-        X_all, y_all, test_size=0.2 if len(X_all) > 12 else 0.1,
-        random_state=42, stratify=y_all if y_all.nunique() > 1 else None
+        X_all, y_all, test_size=0.2 if len(df) > 12 else 0.1, random_state=42
     )
 except ValueError:
     X_tr, X_te, y_tr, y_te = X_all, X_all, y_all, y_all
 
 model.fit(X_tr, y_tr)
-y_pred = model.predict(X_te)
-acc = accuracy_score(y_te, y_pred)
-macro_rec = recall_score(y_te, y_pred, average="macro")
+y_pred_holdout = model.predict(X_te)
+holdout_mae = mean_absolute_error(y_te, y_pred_holdout)
+holdout_r2  = r2_score(y_te, y_pred_holdout)
 
-with st.expander("Detailed classification report"):
-    st.text(classification_report(y_te, y_pred, target_names=["Low (-1)","Stable (0)","High (1)"], digits=3))
-
-m1, m2 = st.columns(2)
-m1.metric("Holdout Accuracy", f"{acc:.2f}")
-m2.metric("Holdout Macro Recall", f"{macro_rec:.2f}")
-
-# =========================
-# Feature importance
-# =========================
-st.markdown("### 📊 Feature Importance (Decision Tree)")
-try:
-    importances = model.feature_importances_
-    order = np.argsort(importances)[::-1]
-    labels = [feature_cols[i] for i in order]
-    fig_imp, ax_imp = plt.subplots(figsize=(8,4))
-    ax_imp.bar(range(len(labels)), importances[order], color="royalblue")
-    ax_imp.set_xticks(range(len(labels)))
-    ax_imp.set_xticklabels(labels, rotation=45, ha="right")
-    ax_imp.set_ylabel("Importance")
-    ax_imp.set_title("Which inputs most influence tomorrow's status?")
-    st.pyplot(fig_imp)
-except Exception:
-    st.info("Feature importances unavailable.")
+# Metrics panel
+st.markdown("### 🧪 Model Performance")
+c1, c2, c3 = st.columns(3)
+c1.metric("CV MAE (ms)", f"{cv_mae:.2f}" if not np.isnan(cv_mae) else "—")
+c2.metric("CV R²", f"{cv_r2:.2f}" if not np.isnan(cv_r2) else "—")
+c3.metric("Holdout MAE (ms)", f"{holdout_mae:.2f}")
 
 # =========================
-# Trend plot
+# Forecast next 1–3 days (recursive)
 # =========================
-st.markdown("### 📈 Overnight HRV vs Baseline & 7d Avg")
-fig_trend, ax_t = plt.subplots(figsize=(10,4))
-ax_t.plot(df["date"], df["overnight_hrv"], label="Overnight HRV", linewidth=2)
-ax_t.plot(df["date"], df["baseline"], label="Baseline", linewidth=1.8)
-ax_t.plot(df["date"], df["seven_day_average"], label="7d Avg", linewidth=1.8)
-ax_t.set_ylabel("HRV (ms)")
-ax_t.set_xlabel("Date")
-ax_t.legend(loc="upper left")
-ax_t.set_title("Overnight HRV vs Baseline vs 7d Avg")
-ax_t.xaxis.set_major_locator(mdates.AutoDateLocator())
-ax_t.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-fig_trend.autofmt_xdate(rotation=30)
-st.pyplot(fig_trend)
+st.markdown("### 🔮 Forecast (Overnight HRV)")
+hist = df.copy()
 
-# =========================
-# Next 1–3 day forecast (recursive)
-# =========================
-st.markdown("### 🔮 Forecast (next 1–3 day status)")
+def build_feature_row(frame: pd.DataFrame, idx: int) -> pd.Series:
+    """Build features at row idx (expects engineered columns present)."""
+    row = frame.iloc[idx].copy()
+    return row[feature_cols]
 
-def predict_status_row(row_series: pd.Series) -> tuple[int, float]:
-    X_row = row_series[feature_cols].to_frame().T.replace([np.inf, -np.inf], np.nan).ffill().bfill()
-    probs = model.predict_proba(X_row)[0] if hasattr(model, "predict_proba") else None
-    pred = model.predict(X_row)[0]
-    conf = float(np.max(probs)) if probs is not None else 1.0
-    return int(pred), conf
+def append_forecast_row(frame: pd.DataFrame, next_date, next_hrv):
+    """Append a new day and recompute engineered columns needed for next step."""
+    # Keep baseline trend flat with tiny drift from last known
+    base_low  = frame["baseline_low"].iloc[-1]  + np.random.normal(0, 0.05)
+    base_high = frame["baseline_high"].iloc[-1] + np.random.normal(0, 0.05)
+    base_mid  = (base_low + base_high) / 2.0
 
-df_fore = df.copy()
-future_rows = []
-cur = df_fore.iloc[-1:].copy()
+    # Update 7d average with rolling mean of overnight_hrv including forecast
+    temp = pd.concat([frame[["date","overnight_hrv"]],
+                      pd.DataFrame({"date":[next_date], "overnight_hrv":[next_hrv]})],
+                     ignore_index=True).sort_values("date")
+    sev_next = temp["overnight_hrv"].rolling(7).mean().iloc[-1]
+    if np.isnan(sev_next):
+        sev_next = temp["overnight_hrv"].tail(3).mean()
 
-for step in range(1, forecast_horizon + 1):
-    # Compute features for the last row (ensure all engineered cols exist)
-    last = cur.iloc[-1].copy()
-
-    # Predict next day status
-    pred_status, conf = predict_status_row(last)
-
-    # Synthesize a plausible next-day overnight HRV to roll features forward
-    base = float(last["baseline"])
-    avg7 = float(last["seven_day_average"])
-    if pred_status == 1:
-        overnight_next = base + dev_threshold + np.random.normal(1.0, 0.4)
-    elif pred_status == -1:
-        overnight_next = base - dev_threshold + np.random.normal(-1.0, 0.4)
-    else:
-        overnight_next = avg7 + np.random.normal(0.0, 0.4)
-
-    next_date = last["date"] + pd.Timedelta(days=1)
-    next_baseline = base + np.random.normal(0.0, 0.1)
-
-    # Update rolling 7d avg from concatenated history
-    hist = pd.concat([df_fore[["date","overnight_hrv"]],
-                      pd.DataFrame({"date":[next_date], "overnight_hrv":[overnight_next]})],
-                      ignore_index=True).sort_values("date")
-    seven_day_next = hist["overnight_hrv"].rolling(7).mean().iloc[-1]
-    if np.isnan(seven_day_next):
-        seven_day_next = hist["overnight_hrv"].tail(3).mean()
-
-    row = {
+    new = {
         "date": next_date,
-        "overnight_hrv": float(overnight_next),
-        "baseline": float(next_baseline),
-        "seven_day_average": float(seven_day_next),
+        "overnight_hrv": float(next_hrv),
+        "baseline_low": float(base_low),
+        "baseline_high": float(base_high),
+        "baseline_mid": float(base_mid),
+        "seven_day_avg": float(sev_next)
     }
-    row["hrv_deviation"]    = row["overnight_hrv"] - row["baseline"]
-    row["weekly_deviation"] = row["overnight_hrv"] - row["seven_day_average"]
-    prev = float(last["overnight_hrv"])
-    row["hrv_change_rate"]  = (row["overnight_hrv"] - prev) / max(prev, 1e-6)
+    new["dev_vs_baseline"] = new["overnight_hrv"] - new["baseline_mid"]
+    new["dev_vs_7davg"]    = new["overnight_hrv"] - new["seven_day_avg"]
+    prev_hrv = frame["overnight_hrv"].iloc[-1]
+    new["hrv_change_rate"] = (new["overnight_hrv"] - prev_hrv) / max(prev_hrv, 1e-6)
 
-    tmp = pd.concat([df_fore, pd.DataFrame([row])], ignore_index=True)
-    tmp["overnight_roll_mean"] = tmp["overnight_hrv"].rolling(roll_days).mean()
-    tmp["overnight_roll_std"]  = tmp["overnight_hrv"].rolling(roll_days).std()
-    tmp["dev_roll_mean"]       = tmp["hrv_deviation"].rolling(roll_days).mean()
-    tmp["dev_roll_std"]        = tmp["hrv_deviation"].rolling(roll_days).std()
-    tail = tmp.iloc[-1][["overnight_roll_mean","overnight_roll_std","dev_roll_mean","dev_roll_std"]].to_dict()
-    row.update(tail)
+    # For rolling features, compute on concatenated frame
+    tmp = pd.concat([frame, pd.DataFrame([new])], ignore_index=True)
+    tmp["hrv_roll_mean"] = tmp["overnight_hrv"].rolling(roll_days).mean()
+    tmp["hrv_roll_std"]  = tmp["overnight_hrv"].rolling(roll_days).std()
+    tmp["dev_roll_mean"] = tmp["dev_vs_baseline"].rolling(roll_days).mean()
+    tmp["dev_roll_std"]  = tmp["dev_vs_baseline"].rolling(roll_days).std()
 
-    row["pred_status"] = pred_status
-    row["confidence"]  = conf
+    # Pull the last computed rolling values
+    new["hrv_roll_mean"] = float(tmp["hrv_roll_mean"].iloc[-1])
+    new["hrv_roll_std"]  = float(tmp["hrv_roll_std"].iloc[-1]) if not np.isnan(tmp["hrv_roll_std"].iloc[-1]) else 0.0
+    new["dev_roll_mean"] = float(tmp["dev_roll_mean"].iloc[-1])
+    new["dev_roll_std"]  = float(tmp["dev_roll_std"].iloc[-1]) if not np.isnan(tmp["dev_roll_std"].iloc[-1]) else 0.0
 
-    future_rows.append(row)
-    cur = pd.concat([cur, pd.DataFrame([row])], ignore_index=True)
-    df_fore = pd.concat([df_fore, pd.DataFrame([row])], ignore_index=True)
+    return pd.concat([frame, pd.DataFrame([new])], ignore_index=True)
 
-if future_rows:
-    fut = pd.DataFrame(future_rows)
-    fut["status_label"] = fut["pred_status"].apply(status_label)
-    fut["conf_pct"] = (fut["confidence"] * 100).round(1)
-    st.dataframe(
-        fut[["date","overnight_hrv","baseline","seven_day_average","status_label","conf_pct"]],
-        use_container_width=True, hide_index=True
-    )
+future_points = []
+working = hist.copy()
+for step in range(1, forecast_horizon + 1):
+    last_idx = len(working) - 1
+    feats = build_feature_row(working, last_idx).to_frame().T.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+    next_pred = float(model.predict(feats)[0])
+    next_date = working["date"].iloc[-1] + pd.Timedelta(days=1)
 
-    fig_fc, ax1 = plt.subplots(figsize=(10,4))
-    ax1.plot(fut["date"], fut["confidence"], label="Confidence (0–1)", linewidth=2)
-    ax1.set_ylim(0, 1)
-    ax1.set_ylabel("Confidence")
-    ax1.set_xlabel("Date")
-    ax1.grid(True, alpha=0.2)
-    ax1.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-
-    ax2 = ax1.twinx()
-    ax2.scatter(fut["date"], fut["pred_status"],
-                c=[status_color(x) for x in fut["pred_status"]], s=60, label="Predicted Status")
-    ax2.set_ylabel("Status  (-1=Low, 0=Stable, 1=High)")
-    ax1.set_title(f"Predicted HRV Status — Next {forecast_horizon} day(s)")
-
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
-    st.pyplot(fig_fc)
+    future_points.append({"date": next_date, "overnight_hrv": next_pred, "type": "Forecast"})
+    working = append_forecast_row(working, next_date, next_pred)
 
 # =========================
-# Download the exact original file (no modifications)
+# Plot: history + forecast
 # =========================
+plot_df_hist = hist[["date","overnight_hrv"]].copy()
+plot_df_hist["type"] = "History"
+plot_df = pd.concat([plot_df_hist, pd.DataFrame(future_points)], ignore_index=True)
 
+st.markdown("#### Overnight HRV — History and Forecast")
+fig, ax = plt.subplots(figsize=(10,4))
+hist_mask = plot_df["type"] == "History"
+fc_mask   = plot_df["type"] == "Forecast"
+
+ax.plot(plot_df.loc[hist_mask, "date"], plot_df.loc[hist_mask, "overnight_hrv"],
+        label="History", linewidth=2)
+ax.plot(plot_df.loc[fc_mask, "date"], plot_df.loc[fc_mask, "overnight_hrv"],
+        label=f"Forecast (+{forecast_horizon}d)", linewidth=2, linestyle="--")
+
+ax.set_ylabel("Overnight HRV (ms)")
+ax.set_xlabel("Date")
+ax.legend(loc="upper left")
+ax.grid(True, alpha=0.25)
+ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+fig.autofmt_xdate(rotation=30)
+st.pyplot(fig)
+
+# =========================
+# Download your ORIGINAL file (unchanged)
+# =========================
 st.markdown("---")
-st.caption("Download the exact same Garmin HRV file that exists in your project folder — no processing applied.")
+st.caption("Download the **exact original** Garmin export (no modifications).")
 
-original_file_path = "HRV Status Garmin.csv"
-
-if os.path.exists(original_file_path):
-    with open(original_file_path, "rb") as f:
-        file_bytes = f.read()
-
+original_path = local_default_path
+if uploaded is not None:
+    # If uploaded, offer to download exactly the uploaded bytes
+    uploaded.seek(0)
+    file_bytes = uploaded.read()
     st.download_button(
-        label="⬇️ Download Original HRV Status Garmin.csv",
+        "⬇️ Download Original (uploaded) HRV Status Garmin.csv",
         data=file_bytes,
         file_name="HRV Status Garmin.csv",
         mime="text/csv"
     )
-    st.success("✅ This is your unmodified Garmin HRV export file.")
+elif os.path.exists(original_path):
+    with open(original_path, "rb") as f:
+        file_bytes = f.read()
+    st.download_button(
+        "⬇️ Download Original HRV Status Garmin.csv",
+        data=file_bytes,
+        file_name="HRV Status Garmin.csv",
+        mime="text/csv"
+    )
 else:
-    st.error("❌ The file 'HRV Status Garmin.csv' was not found in your project folder.")
+    st.info("Upload your Garmin file to enable original-file download.")
