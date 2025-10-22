@@ -189,15 +189,15 @@ pred_df['smoothed_stress'] = pred_df['smoothed_stress'].ffill()
 
 # Main Graph
 data['time'] = pd.to_datetime(data['time'])
-pred_df['timestamp'] = pd.to_datetime(pred_df['timestamp'])
+pred_df['time'] = pd.to_datetime(pred_df['time'])
 
 fig, ax1 = plt.subplots(figsize=(10,5))
-ax1.plot(pred_df['timestamp'], pred_df['confidence'], color='orange', linewidth=2, label='Model Confidence (0–1)')
+ax1.plot(pred_df['time'], pred_df['confidence'], color='orange', linewidth=2, label='Model Confidence (0–1)')
 ax1.set_ylabel('Confidence', color='orange')
 ax1.tick_params(axis='y', labelcolor='orange')
 
 ax2 = ax1.twinx()
-ax2.plot(pred_df['timestamp'], pred_df['smoothed_stress'], color='royalblue', linewidth=2.5, label='Smoothed Predicted Stress')
+ax2.plot(pred_df['time'], pred_df['smoothed_stress'], color='royalblue', linewidth=2.5, label='Smoothed Predicted Stress')
 ax2.set_ylabel('Stress Level (0=Low, 1=Med, 2=High)', color='royalblue')
 ax2.tick_params(axis='y', labelcolor='royalblue')
 
@@ -218,7 +218,7 @@ st.pyplot(fig)
 # Stress Scatter Plot 
 colors = pred_df['smoothed_stress'].map({0: 'green', 1: 'gold', 2: 'red'})
 fig2, ax = plt.subplots(figsize=(10,5))
-ax.scatter(pred_df['timestamp'], pred_df['smoothed_stress'], c=colors, label='Stress Level', alpha=0.8)
+ax.scatter(pred_df['time'], pred_df['smoothed_stress'], c=colors, label='Stress Level', alpha=0.8)
 ax.set_ylabel("Stress Level (0=Low, 1=Med, 2=High)")
 ax.set_xlabel("Time")
 ax.set_title("Predicted Stress Levels by Color")
