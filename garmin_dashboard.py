@@ -31,7 +31,7 @@ st.download_button(
 # Side Bar 
 st.sidebar.header(" Configuration")
 uploaded_file = st.sidebar.file_uploader("📂 Upload Garmin HRV CSV", type=["csv"])
-window_size = st.sidebar.slider("Rolling Window Size \n(Smooths out most _ recent data points\n in sample, one point = 30 seconds)", 30, 200)
+window_size = st.sidebar.slider("Rolling Window Size \n(Smooths out most _ recent data points.\n In sample, one point = 30 seconds)", 30, 200)
 
 if uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
