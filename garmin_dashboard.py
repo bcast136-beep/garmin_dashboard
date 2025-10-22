@@ -152,7 +152,7 @@ ax.set_ylabel("Importance")
 st.pyplot(fig)
 
 # --- HRV Trend ---
-st.subheader("📊 HRV Trend Over Time")
+st.subheader("HRV Trend Over Time")
 fig, ax = plt.subplots(figsize=(10,5))
 ax.plot(data["time"], data["AVNN"], label="AVNN", color="royalblue")
 ax.plot(data["time"], data["RMSSD"], label="RMSSD", color="orange")
@@ -164,6 +164,7 @@ ax.set_title("HRV Metrics Over Time (Rolling Average)")
 st.pyplot(fig)
 
 # --- Forecast Visualization ---
+st.subheader("Stress: 2 Hour Prediction")
 probs = model.predict_proba(X_test)
 confidence = probs.max(axis=1)
 pred_df = pd.DataFrame({
