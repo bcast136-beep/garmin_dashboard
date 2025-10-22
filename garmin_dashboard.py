@@ -119,16 +119,6 @@ model = RandomForestClassifier(n_estimators=200, random_state=42)
 model.fit(X_train, y_train)
 predictions = model.predict(X_test)
 
-recall = recall_score(y_test, predictions, average='macro')
-accuracy = accuracy_score(y_test, predictions)
-
-# Model Performance summary
-st.markdown("### Model Performance Summary")
-col1, col2, col3 = st.columns(3)
-col1.metric("Accuracy", f"{accuracy:.2f}")
-col2.metric("Macro Recall", f"{recall:.2f}")
-col3.metric("Training Samples", len(X_train))
-
 # Plot for feature importance
 # === SMART TEMPORAL MODEL SECTION ===
 st.header("Smart HRV-Based Stress Prediction")
