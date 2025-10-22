@@ -327,3 +327,25 @@ elif os.path.exists(original_path):
     )
 else:
     st.info("Upload your Garmin file to enable original-file download.")
+    
+# Make forecast visually smoother and connect better to history
+ax.plot(
+    plot_df.loc[fc_mask, "date"], 
+    plot_df.loc[fc_mask, "overnight_hrv"],
+    label=f"Forecast (+{forecast_horizon}d)",
+    linewidth=2,
+    linestyle="--",
+    color="darkorange",
+    marker="o"
+)
+
+# Keep y-axis consistent with historical trend
+ymin = max(0, plot_df["overnight_hrv"].min() - 5)
+ymax = plot_df["overnight_hrv"].max() + 5
+ax.set_ylim(ymin, ymax)
+
+# Add annotation to clarify forecast region
+last_hist_date = plot_df.loc[hist_mask, "date"].max()
+ax.axvline(x=last_hist_date, color="gray", linestyle=":", alpha=0.7)
+ax.text(last_hist_date, ymax - 5, "Forecast starts →", rotation=0, color="gray", fontsize=9)
+
