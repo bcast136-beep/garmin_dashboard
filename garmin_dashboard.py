@@ -107,7 +107,10 @@ if missing:
     st.stop()
 
 df = norm.copy()
-df["date"] = pd.to_datetime(df["date"])
+
+# Safely convert Garmin-style dates (handles text, mixed, or UTC formats)
+df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True, infer_datetime_format=True)
+df = df.dropna(subset=["date"]).reset_index(drop=True)
 df = df.sort_values("date").reset_index(drop=True)
 
 # Guardrail: Garmin export size
@@ -360,5 +363,3 @@ if os.path.exists(original_file_path):
     st.success("✅ This is your unmodified Garmin HRV export file.")
 else:
     st.error("❌ The file 'HRV Status Garmin.csv' was not found in your project folder.")
-
-
