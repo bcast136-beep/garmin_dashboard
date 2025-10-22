@@ -9,8 +9,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import recall_score, accuracy_score
 
 # Set Up Page
-st.set_page_config(page_title="Stress Forecast Dashboard", layout="wide")
-st.title("Stress Forecast Dashboard")
+st.set_page_config(page_title=" Garmin Stress Forecast Dashboard", layout="wide")
+st.title("Garmin Stress Forecast Dashboard")
 
 st.markdown("""
 This dashboard analyzes **heart rate variability (HRV)** data to predict future stress levels 
