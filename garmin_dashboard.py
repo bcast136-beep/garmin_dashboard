@@ -96,7 +96,7 @@ col3.metric("Training Samples", len(X_train))
 
 # Plot for feature importance
 # === SMART TEMPORAL MODEL SECTION ===
-st.header("🧠 Smart HRV-Based Stress Prediction")
+st.header("Smart HRV-Based Stress Prediction")
 
 window_size = 20
 data['AVNN'] = data['rr_interval'].rolling(window_size).mean()
@@ -136,7 +136,7 @@ model.fit(X_train, y_train)
 
 # --- Performance metrics ---
 y_pred = model.predict(X_test)
-st.subheader("📘 Model Performance Report")
+st.subheader("Model Performance Report")
 st.text(classification_report(y_test, y_pred, target_names=['Low','Med','High']))
 
 # --- Feature importance ---
@@ -183,10 +183,6 @@ ax2.set_ylabel('Stress Level (0=Low,1=Med,2=High)', color='royalblue')
 ax1.legend(loc='upper right')
 ax1.set_title('Predicted 2-Hour-Ahead Stress Forecast')
 st.pyplot(fig)
-
-
-# Clean up NaN edges and drop incomplete points
-pred_df = pred_df.dropna(subset=['smoothed_stress', 'confidence']).reset_index(drop=True)
 
 pred_df.loc[pred_df['confidence'] < 0.6, 'smoothed_stress'] = np.nan
 pred_df['smoothed_stress'] = pred_df['smoothed_stress'].ffill()
