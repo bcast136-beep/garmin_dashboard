@@ -341,20 +341,24 @@ if future_rows:
     st.pyplot(fig_fc)
 
 # -------------------------
-# Download sample (optional)
+# Download actual Garmin HRV export
 # -------------------------
 st.markdown("---")
-st.caption("Need a sample file with the expected columns? Download one below.")
-sample_csv = df[["date","overnight_hrv","baseline","seven_day_average"]].copy()
-sample_csv = sample_csv.rename(columns={
-    "date":"Date",
-    "overnight_hrv":"Overnight HRV",
-    "baseline":"Baseline",
-    "seven_day_average":"7-day average"
+st.caption("Download your current processed Garmin HRV file.")
+
+# Use the exact Garmin export column names
+actual_csv = df[["date", "overnight_hrv", "baseline", "seven_day_average"]].copy()
+actual_csv = actual_csv.rename(columns={
+    "date": "Date",
+    "overnight_hrv": "Overnight HRV",
+    "baseline": "Baseline",
+    "seven_day_average": "7d Avg"  # Matches your real export naming
 })
+
 st.download_button(
-    "⬇️ Download Sample HRV Status CSV",
-    data=sample_csv.to_csv(index=False).encode("utf-8"),
-    file_name="garmin_hrv_status_sample.csv",
+    "⬇️ Download Processed HRV Status Garmin.csv",
+    data=actual_csv.to_csv(index=False).encode("utf-8"),
+    file_name="HRV Status Garmin.csv",
     mime="text/csv"
 )
+
