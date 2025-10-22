@@ -32,12 +32,12 @@ st.sidebar.info("This app expects columns like: **Date**, **Overnight HRV**, **B
 def load_dataframe():
     # Priority: uploaded -> local file
     if uploaded is not None:
-        st.success("✅ File uploaded.")
+        st.success("File uploaded.")
         return pd.read_csv(uploaded)
     if os.path.exists(local_default_path):
-        st.success("✅ Using local file: HRV Status Garmin.csv")
+        st.success("Using local file: HRV Status Garmin.csv")
         return pd.read_csv(local_default_path)
-    st.error("❌ No data file found. Upload `HRV Status Garmin.csv` or place it next to this script.")
+    st.error(" No data file found. Upload `HRV Status Garmin.csv` or place it next to this script.")
     st.stop()
 
 raw = load_dataframe()
@@ -98,7 +98,7 @@ df = df.rename(columns=col_map)
 required = ["date", "overnight_hrv", "baseline", "seven_day_avg"]
 missing = [c for c in required if c not in df.columns]
 if missing:
-    st.error(f"❌ Missing required column(s): {missing}\n\nFound columns: {list(raw.columns)}")
+    st.error(f" Missing required column(s): {missing}\n\nFound columns: {list(raw.columns)}")
     st.stop()
 
 # Parse/clean each field
@@ -145,7 +145,7 @@ df = df.replace([np.inf, -np.inf], np.nan).ffill().bfill()
 # =========================
 # Data preview
 # =========================
-st.markdown("### 📋 Data Preview (cleaned)")
+st.markdown("Data Preview")
 st.dataframe(
     df[["date","overnight_hrv","baseline_low","baseline_high","baseline_mid","seven_day_avg"]],
     use_container_width=True, hide_index=True
@@ -177,7 +177,7 @@ model = RandomForestRegressor(
     random_state=42
 )
 
-# Cross-validated metrics (don’t waste rows)
+# Cross-validated metrics
 if len(df) >= 8:
     n_splits = min(5, max(2, len(df)//5))
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
@@ -211,7 +211,7 @@ c3.metric("Holdout MAE (ms)", f"{holdout_mae:.2f}")
 # =========================
 # Forecast next 1–3 days (recursive)
 # =========================
-st.markdown("### 🔮 Forecast (Overnight HRV)")
+st.markdown("### Prediction (Overnight HRV)")
 hist = df.copy()
 
 def build_feature_row(frame: pd.DataFrame, idx: int) -> pd.Series:
@@ -294,7 +294,7 @@ plot_df.loc[plot_df["type"] == "Forecast", "overnight_hrv"] = smooth_forecast.lo
 
 
 # === Plot: history + smoothed forecast ===
-st.markdown("#### Overnight HRV — History and Forecast (Smoothed)")
+st.markdown(" Overnight HRV — History and Forecast (Smoothed)")
 fig, ax = plt.subplots(figsize=(10,4))
 
 hist_mask = plot_df["type"] == "History"
