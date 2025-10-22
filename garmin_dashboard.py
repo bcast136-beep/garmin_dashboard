@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import base64
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import recall_score, accuracy_score
 
-# --- PAGE SETUP ---
+# PAGE SETUP
 st.set_page_config(page_title="Stress Forecast Dashboard", layout="wide")
 st.title("Stress Forecast Dashboard")
 
@@ -16,6 +17,16 @@ This dashboard analyzes **heart rate variability (HRV)** data to predict future 
 using Random Forest machine learning. You can upload your own Garmin HRV CSV file or explore 
 the built-in simulated dataset.
 """)
+with open("simulated_rr_stress_30s_large.csv", "rb") as file:
+    csv_data = file.read()
+
+# Add download button
+st.download_button(
+    label="⬇️ Download Sample HRV CSV Data",
+    data=csv_data,
+    file_name="simulated_rr_stress_30s_large.csv",
+    mime="text/csv",
+)
 
 # --- SIDEBAR SETTINGS ---
 st.sidebar.header(" Configuration")
