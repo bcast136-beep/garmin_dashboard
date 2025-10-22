@@ -201,19 +201,19 @@ ax2.plot(pred_df['time'], pred_df['smoothed_stress'], color='royalblue', linewid
 ax2.set_ylabel('Stress Level (0=Low, 1=Med, 2=High)', color='royalblue')
 ax2.tick_params(axis='y', labelcolor='royalblue')
 
-ax1.set_xlabel('Time')
-ax1.set_title('Smoothed 2-Hour Stress Forecast vs Confidence')
+# ax1.set_xlabel('Time')
+# ax1.set_title('Smoothed 2-Hour Stress Forecast vs Confidence')
 
-lines, labels = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines + lines2, labels + labels2, loc='upper right')
+# lines, labels = ax1.get_legend_handles_labels()
+# lines2, labels2 = ax2.get_legend_handles_labels()
+# ax1.legend(lines + lines2, labels + labels2, loc='upper right')
 
-# Format X-axis to show readable 5-minute intervals
-ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-ax1.xaxis.set_major_locator(mdates.MinuteLocator(interval=30))  # show every 30 minutes
-fig.autofmt_xdate(rotation=45)
+# # Format X-axis to show readable 5-minute intervals
+# ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+# ax1.xaxis.set_major_locator(mdates.MinuteLocator(interval=30))  # show every 30 minutes
+# fig.autofmt_xdate(rotation=45)
 
-st.pyplot(fig)
+# st.pyplot(fig)
 
 # Stress Scatter Plot 
 colors = pred_df['smoothed_stress'].map({0: 'green', 1: 'gold', 2: 'red'})
