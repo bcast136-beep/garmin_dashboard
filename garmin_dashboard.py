@@ -8,7 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import recall_score, accuracy_score
 
-# PAGE SETUP
+# Set Up Page
 st.set_page_config(page_title="Stress Forecast Dashboard", layout="wide")
 st.title("Stress Forecast Dashboard")
 
@@ -107,7 +107,7 @@ with st.container():
     st.pyplot(fig)
 
 # --- FORECASTING SECTION ---
-st.markdown("###  Smoothed 2-Hour Stress Forecast")
+st.markdown("### 2-Hour Stress Forecast")
 
 data = features_df.copy()
 data['rmssd_roll3'] = data['RMSSD'].rolling(window=window_size).mean()
@@ -179,7 +179,7 @@ fig.autofmt_xdate(rotation=45)
 st.pyplot(fig)
 
 # --- COLOR-CODED STRESS SCATTER ---
-st.markdown("### Stress Levels ")
+st.markdown("### 2-Hour Predicted Stress Levels ")
 colors = pred_df['smoothed_stress'].map({0: 'green', 1: 'gold', 2: 'red'})
 fig2, ax = plt.subplots(figsize=(10,5))
 ax.scatter(pred_df['timestamp'], pred_df['smoothed_stress'], c=colors, label='Stress Level', alpha=0.8)
@@ -187,5 +187,16 @@ ax.set_ylabel("Stress Level (0=Low, 1=Med, 2=High)")
 ax.set_xlabel("Time")
 ax.set_title("Predicted Stress Levels by Color")
 st.pyplot(fig2)
+
+st.subheader("HRV Trend Over Time")
+fig, ax = plt.subplots(figsize=(10,5))
+ax.plot(features_df["time"], features_df["AVNN"], label="AVNN", color="royalblue")
+ax.plot(features_df["time"], features_df["RMSSD"], label="RMSSD", color="orange")
+ax.set_xlabel("Time")
+ax.set_ylabel("HRV (ms)")
+ax.legend()
+ax.set_title("HRV Metrics Over Time")
+st.pyplot(fig)
+
 
 st.success("✅ Dashboard loaded successfully. Adjust the smoothing or upload new data to explore!")
