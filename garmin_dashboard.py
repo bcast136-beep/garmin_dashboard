@@ -337,21 +337,35 @@ if future_rows:
     st.pyplot(fig_fc)
 
 # =========================
-# Download your actual Garmin-style file
+# Download your processed Garmin HRV file
 # =========================
 st.markdown("---")
-st.caption("Download your current (processed) Garmin HRV file with Garmin-style headers.")
+st.caption("Download your processed HRV Status file — cleaned, normalized, and ready for re-upload or analysis.")
 
-actual = df[["date","overnight_hrv","baseline","seven_day_average"]].copy()
+# If the user’s real Garmin file is in the folder, we use that filename
+file_name = "HRV Status Garmin.csv" if os.path.exists("HRV Status Garmin.csv") else "processed_hrv_status.csv"
+
+# Export the processed HRV DataFrame (post-feature engineering)
+actual = df[["date", "overnight_hrv", "baseline", "seven_day_average"]].copy()
 actual = actual.rename(columns={
     "date": "Date",
     "overnight_hrv": "Overnight HRV",
     "baseline": "Baseline",
-    "seven_day_average": "7d Avg"   # match real Garmin naming
+    "seven_day_average": "7d Avg"  # Keep Garmin’s actual header style
 })
+
+# Add deviation + predicted status columns for completeness
+actual["Deviation (ms)"] = df["hrv_deviation"].round(2)
+if "status_today" in df.columns:
+    actual["Status (Today)"] = df["status_today"].map({-1: "Low", 0: "Stable", 1: "High"})
+if "future_status" in df.columns:
+    actual["Predicted Next-Day Status"] = df["future_status"].map({-1: "Low", 0: "Stable", 1: "High"})
+
+# Download button
 st.download_button(
-    "⬇️ Download: HRV Status Garmin.csv",
+    label="⬇️ Download Your HRV Status Garmin.csv",
     data=actual.to_csv(index=False).encode("utf-8"),
-    file_name="HRV Status Garmin.csv",
+    file_name=file_name,
     mime="text/csv"
 )
+
