@@ -16,7 +16,7 @@ st.image("https://upload.wikimedia.org/wikipedia/commons/3/3d/Garmin_logo.svg", 
 st.title("🩺 Garmin HRV Status Forecast (Next 1–3 Days)")
 
 st.markdown("""
-This dashboard ingests **Garmin HRV Status** exports (columns like `Date`, `Overnight HRV`, `Baseline`, `7d avg`)
+This dashboard ingests **Garmin HRV Status** exports (columns like `Date`, `Overnight HRV`, `Baseline`, `7-day average`)
 and predicts **tomorrow’s HRV status** (Low / Stable / High) — with optional recursive forecasts out to 3 days.
 """)
 
@@ -56,7 +56,7 @@ def load_sample():
         "Date": dates,
         "Overnight HRV": np.round(overnight, 1),
         "Baseline": np.round(baseline, 1),
-        "7d avg": np.round(avg7, 1)
+        "7-day average": np.round(avg7, 1)
     })
     return df
 
@@ -80,8 +80,10 @@ col_map = {
     "baseline": "baseline",
     "7_day_average": "seven_day_average",
     "7-day_average": "seven_day_average",
-    "7d Avg": "seven_day_average",
+    "7-day_avg": "seven_day_average",
+    "7d_avg": "seven_day_average",
     "seven_day_average": "seven_day_average"
+    
 }
 # Create a normalized frame with expected cols if present
 norm = {}
@@ -211,7 +213,7 @@ st.markdown("### 📈 HRV Trends vs Baseline")
 fig_trend, ax_t = plt.subplots(figsize=(10,4))
 ax_t.plot(df["date"], df["overnight_hrv"], label="Overnight HRV", linewidth=2)
 ax_t.plot(df["date"], df["baseline"], label="Baseline", linewidth=1.8)
-ax_t.plot(df["date"], df["seven_day_average"], label="7d Avg", linewidth=1.8)
+ax_t.plot(df["date"], df["seven_day_average"], label="7-day average", linewidth=1.8)
 ax_t.set_ylabel("HRV (ms)")
 ax_t.set_xlabel("Date")
 ax_t.legend(loc="upper left")
@@ -348,7 +350,7 @@ sample_csv = sample_csv.rename(columns={
     "date":"Date",
     "overnight_hrv":"Overnight HRV",
     "baseline":"Baseline",
-    "seven_day_average":"7d Avg"
+    "seven_day_average":"7-day average"
 })
 st.download_button(
     "⬇️ Download Sample HRV Status CSV",
