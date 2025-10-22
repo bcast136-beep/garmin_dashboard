@@ -6,7 +6,9 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import recall_score, accuracy_score
+from sklearn.metrics import accuracy_score, recall_score, classification_report
+from imblearn.over_sampling import SMOTE
+
 
 # Set Up Page
 st.set_page_config(page_title=" Garmin Stress Forecast Dashboard", layout="wide")
@@ -80,6 +82,39 @@ X = features_df[["AVNN", "SDNN", "RMSSD"]]
 y = features_df["stress_level"]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
+# === MODEL TRAINING SECTION ===
+
+# Split data before applying SMOTE to avoid data leakage
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42, stratify=y
+)
+
+# Apply SMOTE on training data only
+smote = SMOTE(random_state=42, sampling_strategy='auto')
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+
+# Check class distribution before and after balancing
+print("Before SMOTE:", np.bincount(y_train))
+print("After SMOTE:", np.bincount(y_train_resampled))
+
+# Train Random Forest model on resampled data
+model = RandomForestClassifier(n_estimators=300, max_depth=10, random_state=42)
+model.fit(X_train_resampled, y_train_resampled)
+
+# Evaluate model
+predictions = model.predict(X_test)
+accuracy = accuracy_score(y_test, predictions)
+recall = recall_score(y_test, predictions, average='macro')
+print(classification_report(y_test, predictions, target_names=['Low', 'Med', 'High']))
+
+# Streamlit dashboard metrics
+col1, col2, col3 = st.columns(3)
+col1.metric("Accuracy", f"{accuracy:.2f}")
+col2.metric("Macro Recall", f"{recall:.2f}")
+col3.metric("Training Samples (after SMOTE)", len(X_train_resampled))
+
+# Train Model
+
 model = RandomForestClassifier(n_estimators=200, random_state=42)
 model.fit(X_train, y_train)
 predictions = model.predict(X_test)
@@ -126,9 +161,6 @@ X = data[feature_cols]
 y = data['future_stress']
 
 # --- Train/test split and model ---
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 model = RandomForestClassifier(n_estimators=200, random_state=42)
@@ -137,6 +169,10 @@ model.fit(X_train, y_train)
 # --- Performance metrics ---
 y_pred = model.predict(X_test)
 st.subheader("Model Performance Report")
+st.text("Precision: Out of all the times the model predicted this class, how many were correct")
+st.text("Recall: Out of all the real instances of this class, how many did the model correctly identify?")
+st.text("F1-score: The balance between precision and recall (harmonic mean).")
+st.text("Support: How many samples of that class actually existed in the test data.")
 st.text(classification_report(y_test, y_pred, target_names=['Low','Med','High']))
 
 # --- Feature importance ---
