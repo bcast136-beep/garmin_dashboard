@@ -59,15 +59,16 @@ st.bar_chart(data['stress_level'].value_counts(), use_container_width=True)
 # Feature Grab
 features = []
 # Convert RR intervals into rolling HRV features
-window_size = 20  # number of data points per window (adjust for smoothing)
-data['AVNN'] = data['rr_interval'].rolling(window_size).mean()
-data['SDNN'] = data['rr_interval'].rolling(window_size).std()
-data['RMSSD'] = data['rr_interval'].rolling(window_size).apply(
-    lambda x: np.sqrt(np.mean(np.diff(x)**2)) if len(x) > 1 else np.nan
-)
+for level, group in data.groupby("stress_level"):
+    rr = group['rr_interval'].to_numpy()
+    avnn = np.mean(rr)
+    sdnn = np.std(rr, ddof=1)
+    diff = np.diff(rr)
+    rmssd = np.sqrt(np.mean(diff**2))
 
-# Drop NaNs created at the start of the rolling window
-data = data.dropna().reset_index(drop=True)
+    for val in rr:
+        features.append([avnn, sdnn, rmssd, level])
+
 
 features_df = pd.DataFrame(features, columns=["AVNN", "SDNN", "RMSSD", "stress_level"])
 features_df['time'] = data['time'].values[:len(features_df)]
@@ -191,15 +192,6 @@ ax.set_xlabel("Time")
 ax.set_title("Predicted Stress Levels by Color")
 st.pyplot(fig2)
 
-st.subheader(" HRV Trend Over Time")
-fig, ax = plt.subplots(figsize=(10,5))
-ax.plot(data["time"], data["AVNN"], label="AVNN", color="royalblue")
-ax.plot(data["time"], data["RMSSD"], label="RMSSD", color="orange")
-ax.set_xlabel("Time")
-ax.set_ylabel("HRV (ms)")
-ax.legend()
-ax.set_title("HRV Metrics Over Time")
-st.pyplot(fig)
 
 
 st.success("✅ Dashboard loaded successfully. Adjust the smoothing or upload new data to explore!")
