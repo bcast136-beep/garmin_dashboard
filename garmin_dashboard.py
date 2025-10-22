@@ -280,24 +280,47 @@ plot_df_hist = hist[["date","overnight_hrv"]].copy()
 plot_df_hist["type"] = "History"
 plot_df = pd.concat([plot_df_hist, pd.DataFrame(future_points)], ignore_index=True)
 
-st.markdown("#### Overnight HRV — History and Forecast")
+# === Smooth forecast and extend continuity ===
+# Blend last 3 days with forecast for smooth transition
+smooth_forecast = pd.concat([hist.tail(3)[["date", "overnight_hrv"]], pd.DataFrame(future_points)], ignore_index=True)
+smooth_forecast["overnight_hrv_smooth"] = smooth_forecast["overnight_hrv"].rolling(window=3, center=True).mean()
+smooth_forecast["overnight_hrv_smooth"].fillna(method="bfill", inplace=True)
+smooth_forecast["overnight_hrv_smooth"].fillna(method="ffill", inplace=True)
+
+# Combine back into plot_df, replacing forecast HRVs with smoothed values
+plot_df.loc[plot_df["type"] == "Forecast", "overnight_hrv"] = smooth_forecast.loc[
+    smooth_forecast["type"] == "Forecast", "overnight_hrv_smooth"
+].values
+
+
+# === Plot: history + smoothed forecast ===
+st.markdown("#### Overnight HRV — History and Forecast (Smoothed)")
 fig, ax = plt.subplots(figsize=(10,4))
+
 hist_mask = plot_df["type"] == "History"
 fc_mask   = plot_df["type"] == "Forecast"
 
 ax.plot(plot_df.loc[hist_mask, "date"], plot_df.loc[hist_mask, "overnight_hrv"],
-        label="History", linewidth=2)
+        label="History", linewidth=2, color="#1f77b4")
 ax.plot(plot_df.loc[fc_mask, "date"], plot_df.loc[fc_mask, "overnight_hrv"],
-        label=f"Forecast (+{forecast_horizon}d)", linewidth=2, linestyle="--")
+        label=f"Forecast (+{forecast_horizon}d)", linewidth=3, linestyle="--", color="#ff7f0e")
 
+# Annotate transition point
+cutoff = plot_df.loc[hist_mask, "date"].max()
+ax.axvline(cutoff, color="gray", linestyle=":", alpha=0.6)
+ax.text(cutoff, plot_df["overnight_hrv"].max()-5, "Forecast starts →", color="gray", fontsize=9, va="top")
+
+# Tighten y-axis
+ax.set_ylim(plot_df["overnight_hrv"].min() - 5, plot_df["overnight_hrv"].max() + 5)
 ax.set_ylabel("Overnight HRV (ms)")
 ax.set_xlabel("Date")
-ax.legend(loc="upper left")
-ax.grid(True, alpha=0.25)
+ax.legend()
+ax.grid(True, alpha=0.3)
 ax.xaxis.set_major_locator(mdates.AutoDateLocator())
 ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
 fig.autofmt_xdate(rotation=30)
 st.pyplot(fig)
+
 
 # =========================
 # Download your ORIGINAL file (unchanged)
@@ -327,7 +350,7 @@ elif os.path.exists(original_path):
     )
 else:
     st.info("Upload your Garmin file to enable original-file download.")
-    
+
 # Make forecast visually smoother and connect better to history
 ax.plot(
     plot_df.loc[fc_mask, "date"], 
