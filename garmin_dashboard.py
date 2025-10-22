@@ -170,9 +170,20 @@ st.dataframe(cls_view, use_container_width=True, hide_index=True)
 # Modeling for tiny datasets
 # =========================
 if y_all.nunique() < 2:
-    st.error("❌ Only one class present at this threshold — cannot train a classifier. "
-             "Lower the deviation threshold or use a longer date range.")
-    st.stop()
+    st.warning(f"⚠️ Only one class found at threshold = {dev_threshold} ms. "
+               "Automatically lowering threshold for training.")
+    # Find the smallest threshold that yields >1 class
+    for t in range(max(1, int(dev_threshold) - 5), 1, -1):
+        df["status_today"] = df["hrv_deviation"].apply(lambda d: status_from_dev(d, t))
+        y_tmp = df["status_today"].shift(-1).dropna()
+        if y_tmp.nunique() > 1:
+            dev_threshold = t
+            st.info(f"✅ Adjusted threshold to {t} ms for training.")
+            break
+    else:
+        st.error("❌ Not enough variation in HRV data, even after adjustment.")
+        st.stop()
+
 
 model = DecisionTreeClassifier(max_depth=3, random_state=42)
 
