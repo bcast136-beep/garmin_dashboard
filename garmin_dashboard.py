@@ -40,9 +40,9 @@ else:
     st.sidebar.info("Using built-in simulated dataset")
     data = pd.read_csv("simulated_rr_stress_5min.csv")
 
-# --- DATA PREVIEW SECTION ---
+# 
 st.markdown("### Dataset Preview")
-st.write("This dataset represents HRV readings recorded in 5-minute intervals with corresponding stress level classifications.")
+st.write("This dataset represents HRV readings recorded in 30-second intervals with corresponding stress level classifications.")
 st.dataframe(
     data.head(10),
     use_container_width=True,
@@ -87,14 +87,34 @@ predictions = model.predict(X_test)
 recall = recall_score(y_test, predictions, average='macro')
 accuracy = accuracy_score(y_test, predictions)
 
-# --- PERFORMANCE SUMMARY ---
+# Model Performance summary
 st.markdown("### Model Performance Summary")
 col1, col2, col3 = st.columns(3)
 col1.metric("Accuracy", f"{accuracy:.2f}")
 col2.metric("Macro Recall", f"{recall:.2f}")
 col3.metric("Training Samples", len(X_train))
 
-# --- FEATURE IMPORTANCE PLOT ---
+# Plot for feature importance
+# Train model with forest
+X = features_df[["AVNN", "SDNN", "RMSSD"]]
+y = features_df["stress_level"]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+model = RandomForestClassifier(n_estimators=200, random_state=42)
+model.fit(X_train, y_train)
+predictions = model.predict(X_test)
+
+recall = recall_score(y_test, predictions, average='macro')
+accuracy = accuracy_score(y_test, predictions)
+
+# Model Performance summary
+st.markdown("### Model Performance Summary")
+col1, col2, col3 = st.columns(3)
+col1.metric("Accuracy", f"{accuracy:.2f}")
+col2.metric("Macro Recall", f"{recall:.2f}")
+col3.metric("Training Samples", len(X_train))
+
+# Plot for feature importance
 importances = model.feature_importances_
 indices = np.argsort(importances)[::-1]
 labels = [X.columns[i] for i in indices]
@@ -111,7 +131,29 @@ with st.container():
     st.pyplot(fig)
 
 # --- FORECASTING SECTION ---
-st.markdown("### 2-Hour Stress Forecast")
+st.markdown("### 2-Hour Predicted Stress Levels")
+
+data = features_df.copy()
+data['rmssd_roll3'] = data['RMSSD'].rolling(window=window_size).mean()
+data['sdnn_roll3'] = data['SDNN'].rolling(window=window_size).mean()
+data['avnn_roll3'] = data['AVNN'].rolling(window=window_size).mean()
+data = data.dropna().reset_index(drop=True)
+data['future_stress'] = data['stress_level'].shift(-24)
+data = data.dropna().reset_index(drop=True)
+
+forecast_features = ['rmssd_roll3', 'sdnn_roll3', 'avnn_roll3']
+X_future = data[forecast_features]
+y_future = data['future_stress']
+
+X_train_f, X_test_f, y_train_f, y_test_f = train_test_split(X_future, y_future, test_size=0.3, random_state=42)
+forecast_model = RandomForestClassifier(n_estimators=200, random_state=42)
+forecast_model.fit(X_train_f, y_train_f)
+
+preds_future = forecast_model.predict(X_test_f)
+probs_future = forecast_model.predict_proba(X_test_f)
+confidence = probs_future.max(axis=1)
+# --- FORECASTING SECTION ---
+st.markdown("### 2-Hour Predicted Stress Levels")
 
 data = features_df.copy()
 data['rmssd_roll3'] = data['RMSSD'].rolling(window=window_size).mean()
@@ -139,8 +181,8 @@ pred_df = pd.DataFrame({
     'confidence': confidence
 }).sort_values('timestamp')
 
-# --- SMOOTHING + CONFIDENCE GATING ---
-pred_df['smoothed_stress'] = (
+# SMOOTHING + CONFIDENCE GATING 
+pred_df['smoothed_stress'] = ( 
     pd.Series(pred_df['predicted_future_stress'])
     .rolling(window=5, center=True)
     .apply(lambda x: round(x.mean()), raw=False)
@@ -154,7 +196,7 @@ pred_df = pred_df.dropna(subset=['smoothed_stress', 'confidence']).reset_index(d
 pred_df.loc[pred_df['confidence'] < 0.6, 'smoothed_stress'] = np.nan
 pred_df['smoothed_stress'] = pred_df['smoothed_stress'].ffill()
 
-# --- MAIN FORECAST CHART ---
+# Main Graph
 data['time'] = pd.to_datetime(data['time'])
 pred_df['timestamp'] = pd.to_datetime(pred_df['timestamp'])
 
@@ -182,8 +224,7 @@ fig.autofmt_xdate(rotation=45)
 
 st.pyplot(fig)
 
-# --- COLOR-CODED STRESS SCATTER ---
-st.markdown("### 2-Hour Predicted Stress Levels ")
+# Stress Scatter Plot 
 colors = pred_df['smoothed_stress'].map({0: 'green', 1: 'gold', 2: 'red'})
 fig2, ax = plt.subplots(figsize=(10,5))
 ax.scatter(pred_df['timestamp'], pred_df['smoothed_stress'], c=colors, label='Stress Level', alpha=0.8)
